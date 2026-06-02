@@ -1,0 +1,613 @@
+```html
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Mini App: Сметный калькулятор</title>
+    <!-- Tailwind CSS для дизайна -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Alpine.js для реактивности и логики -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Иконки FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Telegram WebApp SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #181818;
+            color: #ffffff;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        /* Стилизация полосы прокрутки для нативного вида */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="flex justify-center items-center min-h-screen bg-neutral-900 p-0 sm:p-4">
+
+    <!-- Контейнер приложения (имитирует экран мобильного телефона в браузере или реальный TMA) -->
+    <div 
+        x-data="estimateApp()" 
+        x-init="initApp()"
+        class="w-full max-w-[480px] h-[100vh] sm:h-[840px] bg-neutral-950 sm:rounded-2xl sm:shadow-2xl flex flex-col justify-between overflow-hidden relative border border-neutral-800"
+    >
+        
+        <!-- HEADER (Информация о пользователе Telegram) -->
+        <header class="bg-neutral-900 border-b border-neutral-800 p-4 flex items-center justify-between z-10 shrink-0">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-sky-600 flex items-center justify-center font-bold text-white relative">
+                    <span x-text="getUserInitials()">U</span>
+                    <div class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-neutral-900 rounded-full"></div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-semibold leading-tight" x-text="tgUser.first_name || 'Заказчик'">Гость</h4>
+                    <span class="text-xs text-neutral-400" x-text="tgUser.username ? '@' + tgUser.username : 'Telegram WebApp'">@guest</span>
+                </div>
+            </div>
+            <div class="bg-sky-500/10 text-sky-400 text-xs px-2.5 py-1 rounded-full font-medium border border-sky-500/20">
+                <i class="fa-solid fa-calculator mr-1"></i> Сметчик v1.2
+            </div>
+        </header>
+
+        <!-- MAIN SCROLLABLE CONTENT -->
+        <main class="flex-grow overflow-y-auto p-4 space-y-4">
+
+            <!-- Вкладка 1: Конструктор Сметы -->
+            <div x-show="activeTab === 'calc'" class="space-y-4" x-transition>
+                
+                <!-- Карточка итогов -->
+                <div class="bg-gradient-to-br from-sky-900/40 to-indigo-950/40 border border-sky-500/20 rounded-xl p-5 relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-sky-500/10 rounded-full blur-2xl"></div>
+                    <span class="text-xs text-sky-400 uppercase tracking-wider font-semibold">Итого по смете</span>
+                    <h2 class="text-3xl font-extrabold mt-1 text-white" x-text="formatCurrency(calculateTotal())">0.00 ₽</h2>
+                    
+                    <div class="grid grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/10">
+                        <div>
+                            <span class="text-xs text-neutral-400 block">Позиций</span>
+                            <span class="text-sm font-semibold text-neutral-200" x-text="items.length + ' шт.'">0 шт.</span>
+                        </div>
+                        <div>
+                            <span class="text-xs text-neutral-400 block">Скидка / Наценка</span>
+                            <span class="text-sm font-semibold text-amber-400" x-text="adjustment !== 0 ? adjustment + '%' : 'Нет'">0%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Список добавленных позиций -->
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-md font-semibold text-neutral-300">Выбранные работы и материалы</h3>
+                        <button 
+                            @click="clearEstimate()" 
+                            x-show="items.length > 0" 
+                            class="text-xs text-red-400 hover:text-red-300 transition flex items-center gap-1"
+                        >
+                            <i class="fa-solid fa-trash-can"></i> Очистить
+                        </button>
+                    </div>
+
+                    <!-- Пустое состояние -->
+                    <template x-if="items.length === 0">
+                        <div class="bg-neutral-900/50 border border-dashed border-neutral-800 rounded-xl p-8 text-center">
+                            <i class="fa-solid fa-clipboard-list text-neutral-600 text-3xl mb-2"></i>
+                            <p class="text-sm text-neutral-400">Смета пока пуста. Перейдите в каталог или добавьте позицию вручную.</p>
+                            <button @click="activeTab = 'catalog'" class="mt-4 bg-sky-600 text-white text-xs px-4 py-2 rounded-lg font-medium hover:bg-sky-500 transition">
+                                <i class="fa-solid fa-plus mr-1"></i> Добавить из каталога
+                            </button>
+                        </div>
+                    </template>
+
+                    <!-- Список строк -->
+                    <div class="space-y-2">
+                        <template x-for="(item, index) in items" :key="item.id">
+                            <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-3 flex flex-col gap-3 relative">
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="flex-grow">
+                                        <span class="text-xs font-semibold px-2 py-0.5 rounded bg-neutral-800 text-neutral-400 mb-1 inline-block" x-text="item.category">Категория</span>
+                                        <h4 class="text-sm font-medium text-neutral-200 leading-snug" x-text="item.name">Наименование услуги</h4>
+                                    </div>
+                                    <button @click="removeItem(index)" class="text-neutral-500 hover:text-red-400 p-1">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+
+                                <div class="flex items-center justify-between border-t border-neutral-800/60 pt-2">
+                                    <!-- Редактор количества -->
+                                    <div class="flex items-center gap-1 bg-neutral-950 border border-neutral-800 rounded-lg p-1">
+                                        <button @click="updateQty(index, -1)" class="w-6 h-6 rounded bg-neutral-900 text-neutral-400 hover:text-white flex items-center justify-center text-xs">
+                                            <i class="fa-solid fa-minus"></i>
+                                        </button>
+                                        <input 
+                                            type="number" 
+                                            x-model.number="item.qty" 
+                                            class="w-12 text-center bg-transparent border-none text-sm text-white focus:ring-0 focus:outline-none"
+                                            min="1"
+                                        >
+                                        <button @click="updateQty(index, 1)" class="w-6 h-6 rounded bg-neutral-900 text-neutral-400 hover:text-white flex items-center justify-center text-xs">
+                                            <i class="fa-solid fa-plus"></i>
+                                        </button>
+                                        <span class="text-xs text-neutral-500 pr-1" x-text="item.unit">м²</span>
+                                    </div>
+
+                                    <!-- Расчет стоимости -->
+                                    <div class="text-right">
+                                        <div class="text-xs text-neutral-500" x-text="formatCurrency(item.price) + ' / ' + item.unit"></div>
+                                        <div class="text-sm font-bold text-sky-400" x-text="formatCurrency(item.price * item.qty)"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Регуляторы наценок -->
+                <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-4" x-show="items.length > 0">
+                    <h3 class="text-sm font-semibold text-neutral-300"><i class="fa-solid fa-sliders text-sky-500 mr-2"></i>Дополнительные параметры</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-neutral-400">Скидка (-) или Наценка (+)</span>
+                                <span class="font-bold text-amber-400" x-text="adjustment > 0 ? '+' + adjustment + '%' : adjustment + '%'">0%</span>
+                            </div>
+                            <input 
+                                type="range" 
+                                min="-30" 
+                                max="30" 
+                                step="5" 
+                                x-model.number="adjustment" 
+                                class="w-full accent-sky-500 bg-neutral-800 rounded-lg appearance-none h-1.5"
+                            >
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Кнопка добавления произвольной позиции вручную -->
+                <button 
+                    @click="showCustomModal = true" 
+                    class="w-full bg-neutral-900 border border-neutral-800 hover:border-sky-500/50 text-neutral-300 py-3 rounded-xl text-sm font-medium transition flex items-center justify-center gap-2"
+                >
+                    <i class="fa-solid fa-keyboard text-sky-500"></i> Ввести позицию вручную
+                </button>
+            </div>
+
+            <!-- Вкладка 2: Каталог услуг -->
+            <div x-show="activeTab === 'catalog'" class="space-y-4" x-transition>
+                <div class="flex items-center gap-2">
+                    <div class="relative flex-grow">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-500 text-xs"></i>
+                        <input 
+                            type="text" 
+                            x-model="searchQuery" 
+                            placeholder="Поиск услуг или материалов..." 
+                            class="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-sky-500"
+                        >
+                    </div>
+                </div>
+
+                <!-- Список категорий каталога -->
+                <div class="flex gap-2 overflow-x-auto pb-1 shrink-0">
+                    <template x-for="cat in categories">
+                        <button 
+                            @click="selectedCategory = cat"
+                            :class="selectedCategory === cat ? 'bg-sky-600 text-white border-sky-500' : 'bg-neutral-900 text-neutral-400 border-neutral-800'"
+                            class="px-4 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap transition"
+                            x-text="cat"
+                        ></button>
+                    </template>
+                </div>
+
+                <!-- Список товаров/услуг в каталоге -->
+                <div class="space-y-2">
+                    <template x-for="item in filteredCatalog()" :key="item.id">
+                        <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-3.5 flex items-center justify-between gap-4">
+                            <div>
+                                <span class="text-[10px] uppercase font-bold text-sky-500 tracking-wider block" x-text="item.category">КАТЕГОРИЯ</span>
+                                <h4 class="text-sm font-medium text-white mt-0.5" x-text="item.name">Название услуги</h4>
+                                <span class="text-xs text-neutral-400" x-text="formatCurrency(item.price) + ' / ' + item.unit"></span>
+                            </div>
+                            
+                            <!-- Кнопка добавить / Счетчик -->
+                            <div>
+                                <template x-if="!isInEstimate(item.id)">
+                                    <button 
+                                        @click="addToEstimate(item)" 
+                                        class="bg-sky-600 hover:bg-sky-500 text-white w-9 h-9 rounded-xl flex items-center justify-center transition"
+                                    >
+                                        <i class="fa-solid fa-plus"></i>
+                                    </button>
+                                </template>
+                                <template x-if="isInEstimate(item.id)">
+                                    <div class="bg-green-500/10 text-green-400 border border-green-500/20 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5">
+                                        <i class="fa-solid fa-check"></i> В смете
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Вкладка 3: Инструкция и экспорт во FlutterFlow -->
+            <div x-show="activeTab === 'guide'" class="space-y-4 text-xs" x-transition>
+                <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-4 space-y-4">
+                    <h3 class="text-md font-bold text-white flex items-center gap-2 border-b border-neutral-800 pb-2">
+                        <i class="fa-solid fa-circle-info text-sky-500"></i> Руководство по FlutterFlow
+                    </h3>
+                    
+                    <p class="text-neutral-300 leading-relaxed text-sm">
+                        Вы можете использовать данный интерактивный прототип как самостоятельный Telegram Mini App. Но если вы собираете его полноценно внутри <strong>FlutterFlow</strong>, используйте следующую архитектуру:
+                    </p>
+
+                    <div class="space-y-3">
+                        <!-- 1. БД -->
+                        <div class="bg-neutral-950 p-3 rounded-lg border border-neutral-800">
+                            <span class="text-[10px] font-bold text-sky-400 uppercase tracking-wider block mb-1">Шаг 1: Схема Firestore</span>
+                            <p class="font-semibold text-neutral-200">Коллекция: <code class="text-amber-400">estimates</code></p>
+                            <ul class="list-disc pl-4 mt-1 text-neutral-400 space-y-1">
+                                <li><code class="text-xs">tg_user_id</code> (String)</li>
+                                <li><code class="text-xs">created_at</code> (Timestamp)</li>
+                                <li><code class="text-xs">total_sum</code> (Double)</li>
+                                <li><code class="text-xs">adjustment_percent</code> (Integer)</li>
+                                <li><code class="text-xs">items_list</code> (List of JSON Objects with name, price, qty, unit, category)</li>
+                            </ul>
+                        </div>
+
+                        <!-- 2. Custom Action -->
+                        <div class="bg-neutral-950 p-3 rounded-lg border border-neutral-800">
+                            <div class="flex justify-between items-center mb-1">
+                                <span class="text-[10px] font-bold text-sky-400 uppercase tracking-wider block">Шаг 2: Custom Action на Dart</span>
+                                <button @click="copyActionCode()" class="text-sky-400 hover:text-sky-300 text-[10px] flex items-center gap-1">
+                                    <i class="fa-regular fa-copy"></i> Копировать код
+                                </button>
+                            </div>
+                            <p class="text-neutral-300 mb-2">Создайте во FlutterFlow Custom Action для обратной отправки данных в бота:</p>
+                            <pre class="bg-neutral-900 p-2 rounded text-[10px] text-emerald-400 overflow-x-auto max-h-40 font-mono">
+import 'dart:js' as js;
+import 'dart:convert';
+
+Future sendEstimateToTelegram(
+  double totalSum,
+  List&lt;dynamic&gt; itemsList,
+) async {
+  try {
+    if (js.context.hasProperty('Telegram') && 
+        js.context['Telegram'].hasProperty('WebApp')) {
+      var webApp = js.context['Telegram']['WebApp'];
+      
+      var data = {
+        'total': totalSum,
+        'items': itemsList,
+      };
+      
+      webApp.callMethod('sendData', [jsonEncode(data)]);
+    }
+  } catch (e) {
+    print("Error sending data to Telegram: $e");
+  }
+}</pre>
+                        </div>
+
+                        <!-- 3. Настройка BotFather -->
+                        <div class="bg-neutral-950 p-3 rounded-lg border border-neutral-800">
+                            <span class="text-[10px] font-bold text-sky-400 uppercase tracking-wider block mb-1">Шаг 3: Настройка в Telegram</span>
+                            <ol class="list-decimal pl-4 mt-1 text-neutral-400 space-y-1">
+                                <li>Сделайте веб-деплой проекта во FlutterFlow.</li>
+                                <li>Перейдите в <strong class="text-neutral-200">@BotFather</strong> и отправьте команду <code class="text-neutral-200">/newapp</code>.</li>
+                                <li>Свяжите Mini App со своим ботом и укажите ссылку на деплой FlutterFlow.</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- FOOTER & ACTIONS (Итоговые действия) -->
+        <footer class="bg-neutral-900 border-t border-neutral-800 p-4 shrink-0 space-y-3">
+            
+            <!-- Основная кнопка отправки данных (Тут используется Telegram WebApp API) -->
+            <button 
+                @click="sendToTelegramBot()"
+                :disabled="items.length === 0"
+                class="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-50 disabled:hover:bg-sky-600 text-white py-3.5 rounded-xl font-semibold text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-sky-500/10"
+            >
+                <i class="fa-solid fa-paper-plane"></i> Отправить смету в чат бота
+            </button>
+
+            <!-- Навигационная панель вкладок (Таббар) -->
+            <div class="grid grid-cols-3 gap-1 bg-neutral-950 p-1.5 rounded-xl border border-neutral-800/80">
+                <button 
+                    @click="activeTab = 'calc'" 
+                    :class="activeTab === 'calc' ? 'bg-neutral-900 text-sky-400 font-semibold' : 'text-neutral-500 hover:text-neutral-300'"
+                    class="py-2.5 rounded-lg text-xs flex flex-col items-center justify-center gap-1 transition"
+                >
+                    <i class="fa-solid fa-calculator text-base"></i>
+                    Смета
+                </button>
+                <button 
+                    @click="activeTab = 'catalog'" 
+                    :class="activeTab === 'catalog' ? 'bg-neutral-900 text-sky-400 font-semibold' : 'text-neutral-500 hover:text-neutral-300'"
+                    class="py-2.5 rounded-lg text-xs flex flex-col items-center justify-center gap-1 transition"
+                >
+                    <i class="fa-solid fa-book-open text-base"></i>
+                    Каталог услуг
+                </button>
+                <button 
+                    @click="activeTab = 'guide'" 
+                    :class="activeTab === 'guide' ? 'bg-neutral-900 text-sky-400 font-semibold' : 'text-neutral-500 hover:text-neutral-300'"
+                    class="py-2.5 rounded-lg text-xs flex flex-col items-center justify-center gap-1 transition"
+                >
+                    <i class="fa-solid fa-code text-base"></i>
+                    F-Flow Гайд
+                </button>
+            </div>
+        </footer>
+
+        <!-- МОДАЛЬНОЕ ОКНО: Добавление позиции вручную -->
+        <div 
+            x-show="showCustomModal" 
+            class="absolute inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
+            x-transition
+        >
+            <div @click.away="showCustomModal = false" class="bg-neutral-900 border border-neutral-800 w-full max-w-sm rounded-2xl p-6 space-y-4">
+                <div class="flex items-center justify-between border-b border-neutral-800 pb-3">
+                    <h3 class="text-md font-bold text-white"><i class="fa-solid fa-keyboard text-sky-500 mr-2"></i>Своя позиция</h3>
+                    <button @click="showCustomModal = false" class="text-neutral-400 hover:text-white">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-xs text-neutral-400 block mb-1">Наименование услуги/товара</label>
+                        <input type="text" x-model="customItem.name" class="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-sky-500" placeholder="Напр. Подготовка стен">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs text-neutral-400 block mb-1">Цена за ед.</label>
+                            <input type="number" x-model.number="customItem.price" class="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-sky-500" placeholder="0">
+                        </div>
+                        <div>
+                            <label class="text-xs text-neutral-400 block mb-1">Ед. измерения</label>
+                            <select x-model="customItem.unit" class="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-sky-500">
+                                <option value="м²">м²</option>
+                                <option value="м.п.">м.п.</option>
+                                <option value="шт.">шт.</option>
+                                <option value="услуга">услуга</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="text-xs text-neutral-400 block mb-1">Количество</label>
+                        <input type="number" x-model.number="customItem.qty" class="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-sky-500" placeholder="1">
+                    </div>
+                </div>
+
+                <button 
+                    @click="addCustomItem()" 
+                    class="w-full bg-sky-600 hover:bg-sky-500 text-white py-3 rounded-xl font-semibold text-sm transition"
+                >
+                    Добавить в смету
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ЛОГИКА ПРИЛОЖЕНИЯ НА JS -->
+    <script>
+        function estimateApp() {
+            return {
+                // Основные состояния
+                activeTab: 'calc',
+                showCustomModal: false,
+                searchQuery: '',
+                selectedCategory: 'Все',
+                adjustment: 0, // Скидка или Наценка в %
+                
+                // Telegram User
+                tgUser: {
+                    first_name: 'Пользователь',
+                    username: 'tg_web_app_user'
+                },
+
+                // Текущая смета
+                items: [
+                    { id: '1', name: 'Штукатурка стен по маякам', price: 650, qty: 50, unit: 'м²', category: 'Черновые работы' },
+                    { id: '2', name: 'Разводка кабеля ГОСТ 3х2.5', price: 150, qty: 100, unit: 'м.п.', category: 'Электрика' }
+                ],
+
+                // Новая произвольная позиция
+                customItem: {
+                    name: '',
+                    price: null,
+                    unit: 'м²',
+                    qty: 1
+                },
+
+                // Прайс-лист / Каталог (Используется для вкладки Каталог)
+                categories: ['Все', 'Черновые работы', 'Чистовые работы', 'Электрика', 'Сантехника'],
+                catalog: [
+                    { id: '1', name: 'Штукатурка стен по маякам', price: 650, unit: 'м²', category: 'Черновые работы' },
+                    { id: '101', name: 'Грунтовка стен глубокого проникновения', price: 120, unit: 'м²', category: 'Черновые работы' },
+                    { id: '102', name: 'Стяжка пола до 50мм самовыравнивающаяся', price: 550, unit: 'м²', category: 'Черновые работы' },
+                    { id: '2', name: 'Разводка кабеля ГОСТ 3х2.5', price: 150, unit: 'м.п.', category: 'Электрика' },
+                    { id: '201', name: 'Установка подрозетника в бетон', price: 350, unit: 'шт.', category: 'Электрика' },
+                    { id: '202', name: 'Монтаж щита распределительного (до 12 групп)', price: 4500, unit: 'услуга', category: 'Электрика' },
+                    { id: '3', name: 'Покраска стен в 2 слоя', price: 350, unit: 'м²', category: 'Чистовые работы' },
+                    { id: '301', name: 'Укладка ламината по диагонали', price: 450, unit: 'м²', category: 'Чистовые работы' },
+                    { id: '302', name: 'Поклейка флизелиновых обоев', price: 300, unit: 'м²', category: 'Чистовые работы' },
+                    { id: '4', name: 'Прокладка труб водоснабжения (REHAU)', price: 1200, unit: 'м.п.', category: 'Сантехника' },
+                    { id: '401', name: 'Установка и подключение инсталляции', price: 4500, unit: 'шт.', category: 'Сантехника' }
+                ],
+
+                // Инициализация (Интеграция с реальным Telegram WebApp SDK)
+                initApp() {
+                    if (window.Telegram && window.Telegram.WebApp) {
+                        const tg = window.Telegram.WebApp;
+                        tg.ready();
+                        tg.expand();
+                        
+                        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+                            this.tgUser = tg.initDataUnsafe.user;
+                        }
+                    }
+                },
+
+                // Инициалы пользователя
+                getUserInitials() {
+                    const name = this.tgUser.first_name || '';
+                    return name ? name.substring(0, 1).toUpperCase() : 'U';
+                },
+
+                // Калькуляция итогов
+                calculateTotal() {
+                    let subtotal = this.items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+                    let finalTotal = subtotal + (subtotal * (this.adjustment / 100));
+                    return Math.max(0, finalTotal);
+                },
+
+                formatCurrency(value) {
+                    return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(value);
+                },
+
+                // Управление количеством
+                updateQty(index, delta) {
+                    this.items[index].qty = Math.max(1, this.items[index].qty + delta);
+                },
+
+                // Удаление позиции
+                removeItem(index) {
+                    this.items.splice(index, 1);
+                },
+
+                // Очистка сметы
+                clearEstimate() {
+                    if(confirm("Вы уверены, что хотите удалить все позиции сметы?")) {
+                        this.items = [];
+                    }
+                },
+
+                // Проверка на присутствие в смете
+                isInEstimate(id) {
+                    return this.items.some(item => item.id === id);
+                },
+
+                // Добавление из каталога
+                addToEstimate(catalogItem) {
+                    this.items.push({
+                        id: catalogItem.id,
+                        name: catalogItem.name,
+                        price: catalogItem.price,
+                        qty: 1,
+                        unit: catalogItem.unit,
+                        category: catalogItem.category
+                    });
+                },
+
+                // Фильтрация каталога при поиске и выборе категорий
+                filteredCatalog() {
+                    return this.catalog.filter(item => {
+                        const matchesCategory = this.selectedCategory === 'Все' || item.category === this.selectedCategory;
+                        const matchesSearch = item.name.toLowerCase().includes(this.searchQuery.toLowerCase()) || 
+                                              item.category.toLowerCase().includes(this.searchQuery.toLowerCase());
+                        return matchesCategory && matchesSearch;
+                    });
+                },
+
+                // Добавление кастомного айтема через модалку
+                addCustomItem() {
+                    if (!this.customItem.name || !this.customItem.price) {
+                        alert("Заполните название и стоимость позиции!");
+                        return;
+                    }
+                    this.items.push({
+                        id: 'custom_' + Date.now(),
+                        name: this.customItem.name,
+                        price: Number(this.customItem.price),
+                        qty: Math.max(1, Number(this.customItem.qty)),
+                        unit: this.customItem.unit,
+                        category: 'Вручную'
+                    });
+                    
+                    // Сброс модалки
+                    this.customItem = { name: '', price: null, unit: 'м²', qty: 1 };
+                    this.showCustomModal = false;
+                },
+
+                // Отправка данных обратно в бот Telegram
+                sendToTelegramBot() {
+                    if (this.items.length === 0) return;
+
+                    const estimateData = {
+                        total_sum: this.calculateTotal(),
+                        adjustment_percent: this.adjustment,
+                        items: this.items
+                    };
+
+                    if (window.Telegram && window.Telegram.WebApp) {
+                        const tg = window.Telegram.WebApp;
+                        
+                        // Метод WebApp.sendData() возвращает JSON-строку обратно боту
+                        // Бот ловит её через событие web_app_data
+                        tg.sendData(JSON.stringify(estimateData));
+                        tg.close();
+                    } else {
+                        // Симуляция в обычном браузере
+                        alert("Интеграция с Telegram сработала! \n\nДанные сметы, которые будут отправлены боту: \n" + JSON.stringify(estimateData, null, 2));
+                    }
+                },
+
+                // Вспомогательный метод для копирования кода
+                copyActionCode() {
+                    const code = `import 'dart:js' as js;
+import 'dart:convert';
+
+Future sendEstimateToTelegram(
+  double totalSum,
+  List<dynamic> itemsList,
+) async {
+  try {
+    if (js.context.hasProperty('Telegram') && 
+        js.context['Telegram'].hasProperty('WebApp')) {
+      var webApp = js.context['Telegram']['WebApp'];
+      
+      var data = {
+        'total': totalSum,
+        'items': itemsList,
+      };
+      
+      webApp.callMethod('sendData', [jsonEncode(data)]);
+    }
+  } catch (e) {
+    print("Error sending data to Telegram: $e");
+  }
+}`;
+                    navigator.clipboard.writeText(code);
+                    alert("Dart-код скопирован в буфер обмена!");
+                }
+            }
+        }
+    </script>
+</body>
+</html>
+
+```
